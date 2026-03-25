@@ -5,7 +5,13 @@ function run(method, ...args){
   return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[method](...args));
 }
 
-async function init(){
+function handleError(err){
+  const message = (err && err.message) ? err.message : String(err || "Error desconocido");
+  alert("Error de autenticación: " + message);
+  window.top.location.href = "<?= getLoginUrl() ?>";
+}
+
+async function initApp(){
   state.bootstrap = await run('getBootstrapData');
   document.documentElement.style.setProperty('--primary', state.bootstrap.config.colorPrimario || '#0b5fff');
   renderLayout();
@@ -218,5 +224,5 @@ function fileToBase64(file){
   });
 }
 
-init().catch(err=>{document.getElementById('app').innerHTML=`<div class="card">Error: ${err.message||err}</div>`;});
+
 </script>

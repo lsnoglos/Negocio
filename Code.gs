@@ -53,8 +53,21 @@ const ROLE_PERMISSIONS = {
   }
 };
 
-function doGet() {
+function doGet(e) {
   ensureBootstrap();
+
+  const email = Session.getActiveUser().getEmail();
+  Logger.log('Usuario actual: ' + (email || '(sin email)'));
+
+  if (!email) {
+    const template = HtmlService.createTemplateFromFile('Login');
+    template.loginUrl = getLoginUrl();
+    return template.evaluate()
+      .setTitle('Login')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
     .setTitle('Sistema Comercial')
@@ -134,7 +147,10 @@ function saveBusinessConfig(payload) {
 
 function getCurrentUserData() {
   const email = Session.getActiveUser().getEmail();
-  if (!email) return { email: '', role: 'guest', displayName: 'Invitado' };
+
+  if (!email) {
+    throw new Error('Usuario no autenticado');
+  }
 
   const access = getAccessByEmail(email);
   if (!access) {
