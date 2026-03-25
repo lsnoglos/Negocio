@@ -7,5 +7,14 @@
   <body>
     <div id="app"></div>
     <?!= include('ClientJS'); ?>
+    <script>
+      function startApp() {
+        if (typeof window.initApp === 'function') {
+          window.initApp().catch(window.handleError);
+        }
+      }
+
+      window.onload = startApp;
+    </script>
   </body>
 </html>
