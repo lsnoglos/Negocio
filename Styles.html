@@ -1,0 +1,30 @@
+<style>
+:root { --primary:#0b5fff; --bg:#f3f5fb; --text:#1d2433; --danger:#e53935; --warn:#f9a825; --ok:#2e7d32; }
+*{box-sizing:border-box;font-family:Arial,sans-serif}
+body{margin:0;background:var(--bg);color:var(--text)}
+.layout{display:flex;min-height:100vh}
+.sidebar{width:250px;background:#111827;color:#fff;padding:12px;position:fixed;left:-260px;top:0;bottom:0;transition:.2s;z-index:20;overflow:auto}
+.sidebar.open{left:0}
+.menu-btn{background:var(--primary);border:none;color:#fff;padding:8px 12px;border-radius:8px}
+.menu-item{display:block;color:#fff;padding:10px;border-radius:8px;text-decoration:none;margin:5px 0;background:#1f2937}
+.main{flex:1;margin-left:0}
+.header{position:sticky;top:0;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #ddd;z-index:10}
+.brand{display:flex;align-items:center;gap:10px}
+.brand img{width:40px;height:40px;border-radius:8px;object-fit:cover}
+.content{padding:14px}
+.card{background:#fff;padding:14px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08);margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+input,select,button,textarea{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:4px 0}
+button.primary{background:var(--primary);color:white;border:none}
+.table{width:100%;border-collapse:collapse;font-size:14px}
+.table th,.table td{border-bottom:1px solid #e2e8f0;padding:8px;text-align:left}
+.badge{padding:4px 8px;border-radius:999px;font-size:12px}
+.badge-danger{background:#ffebee;color:var(--danger)}
+.badge-warn{background:#fff8e1;color:#8d6e00}
+.badge-ok{background:#e8f5e9;color:var(--ok)}
+.public-hero{background:linear-gradient(135deg,#ffea00,#ff6f00);padding:20px;border-radius:16px;color:#17202a;overflow:hidden;position:relative}
+.marquee{display:inline-block;white-space:nowrap;animation:slide 8s linear infinite;font-weight:bold;font-size:20px}
+@keyframes slide{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}
+video{width:100%;border-radius:12px;background:#000}
+@media(min-width:900px){.sidebar{left:0;position:sticky}.main{margin-left:0}.menu-btn{display:none}}
+</style>
