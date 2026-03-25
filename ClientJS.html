@@ -1,0 +1,222 @@
+<script>
+let state = { bootstrap:null, cart:[], scannerStream:null };
+
+function run(method, ...args){
+  return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[method](...args));
+}
+
+async function init(){
+  state.bootstrap = await run('getBootstrapData');
+  document.documentElement.style.setProperty('--primary', state.bootstrap.config.colorPrimario || '#0b5fff');
+  renderLayout();
+}
+
+function renderLayout(){
+  const b = state.bootstrap;
+  const loggedIn = b.user.role !== 'guest';
+  const name = b.config.nombreNegocio;
+  const logo = b.config.logoUrl || 'https://placehold.co/80x80';
+  const p = b.permissions;
+
+  const menu = [
+    ['Inicio','home',true],
+    ['Dashboard','dashboard',p.viewDashboard],
+    ['Ventas','sales',p.sellProducts || p.viewSales],
+    ['Inventario','inventory',p.manageInventory],
+    ['Libro diario','journal',p.viewJournal],
+    ['Libro mayor','ledger',p.viewLedger],
+    ['Permisos','access',p.manageAccess],
+    ['Configuración','settings',p.manageSettings]
+  ].filter(m=>m[2]).map(m=>`<a class="menu-item" href="#" onclick="navigate('${m[1]}')">${m[0]}</a>`).join('');
+
+  document.getElementById('app').innerHTML = `
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">${menu}</aside>
+    <main class="main">
+      <header class="header">
+        <div class="brand">
+          <button class="menu-btn" onclick="toggleMenu()">☰</button>
+          <img src="${logo}"><div><strong>${name}</strong></div>
+        </div>
+        <div>
+          ${loggedIn ? `${b.user.email} (${b.user.role}) <button onclick="logout()">Cerrar sesión</button> <button onclick="login()">Cambiar cuenta</button>` : `<button onclick="login()">Iniciar con Google</button>`}
+        </div>
+      </header>
+      <section class="content" id="content"></section>
+    </main>
+  </div>`;
+
+  navigate('home');
+}
+
+function toggleMenu(){ document.getElementById('sidebar').classList.toggle('open'); }
+async function login(){ window.top.location.href = await run('getLoginUrl'); }
+async function logout(){ window.top.location.href = await run('softLogout'); }
+
+async function navigate(view){
+  const c = document.getElementById('content');
+  if(view==='home') return renderHome(c);
+  if(view==='dashboard') return renderDashboard(c);
+  if(view==='sales') return renderSales(c);
+  if(view==='inventory') return renderInventory(c);
+  if(view==='access') return renderAccess(c);
+  if(view==='settings') return renderSettings(c);
+  if(view==='journal') return renderJournal(c);
+  if(view==='ledger') return renderLedger(c);
+}
+
+function renderHome(c){
+  const b = state.bootstrap;
+  const top = b.topProduct;
+  c.innerHTML = `<div class="public-hero">
+    <h2>${b.config.nombreNegocio}</h2>
+    <p>Las mejores ofertas te esperan.</p>
+    ${top ? `<div class="marquee">🔥 Producto más vendido: ${top.nombre} - $${top.precio} 🔥</div>
+    <div style="margin-top:10px"><img src="${top.imageUrl || 'https://placehold.co/280x160'}" style="width:220px;border-radius:12px"></div>` : '<p>Aún no hay productos vendidos.</p>'}
+  </div>`;
+}
+
+async function renderDashboard(c){
+  const s = await run('getDashboardStats');
+  c.innerHTML = `<div class="grid">
+    <div class="card"><h3>Ventas del día</h3><p>$${s.todayTotal.toFixed(2)}</p></div>
+    <div class="card"><h3>Top del día</h3><p>${s.topToday ? `${s.topToday.nombre} (${s.topToday.cantidad})`:'Sin datos'}</p></div>
+    <div class="card"><h3>Top de la semana</h3><p>${s.topWeek ? `${s.topWeek.nombre} (${s.topWeek.cantidad})`:'Sin datos'}</p></div>
+  </div>`;
+}
+
+async function renderInventory(c){
+  const list = await run('listProducts');
+  const low = state.bootstrap.config.lowStockThreshold || 5;
+  c.innerHTML = `<div class="card"><h3>Producto</h3>
+  <div class="grid"><input id="p_nombre" placeholder="Nombre"><input id="p_precio" type="number" placeholder="Precio"><input id="p_cantidad" type="number" placeholder="Cantidad"><input id="p_categoria" placeholder="Categoría"><textarea id="p_desc" placeholder="Descripción"></textarea><input id="p_img" type="file" accept="image/*"><button class="primary" onclick="saveProduct()">Guardar producto</button></div></div>
+  <div class="card"><table class="table"><tr><th>Nombre</th><th>Precio</th><th>Cantidad</th><th>Estado</th><th>QR</th></tr>
+  ${list.map(p=>{const qty=Number(p.cantidad||0);const cls=qty===0?'danger':(qty<=low?'warn':'ok');const label=qty===0?'Agotado':(qty<=low?'Bajo':'OK');return `<tr><td>${p.nombre}</td><td>$${p.precio}</td><td>${qty}</td><td><span class="badge badge-${cls}">${label}</span></td><td>${p.qrUrl?`<a href="${p.qrUrl}" target="_blank">Ver QR</a>`:''}</td></tr>`}).join('')}
+  </table></div>`;
+}
+
+async function saveProduct(){
+  const file = document.getElementById('p_img').files[0];
+  const payload = {
+    nombre:document.getElementById('p_nombre').value,
+    precio:Number(document.getElementById('p_precio').value||0),
+    cantidad:Number(document.getElementById('p_cantidad').value||0),
+    categoria:document.getElementById('p_categoria').value,
+    descripcion:document.getElementById('p_desc').value
+  };
+  if(file){
+    const data = await fileToBase64(file);
+    payload.imageBase64 = data.base64; payload.imageMimeType = data.mimeType;
+  }
+  await run('upsertProduct', payload);
+  await navigate('inventory');
+}
+
+async function renderSales(c){
+  const products = await run('listProducts');
+  c.innerHTML = `<div class="card"><h3>Nueva venta (escaneo QR manual + cámara)</h3>
+  <video id="scanner" autoplay playsinline></video>
+  <div class="grid"><input id="scan_manual" placeholder="ID producto (o QR leído)"><button onclick="addByManual()">Agregar producto</button></div>
+  <div id="sale_items"></div>
+  <div class="grid"><input id="customer_name" placeholder="Cliente"><input id="paid_with" type="number" placeholder="Pagó con"><button class="primary" onclick="finishSale()">Finalizar compra</button></div>
+  <button onclick="startScan()">Abrir cámara</button> <button onclick="stopScan()">Detener cámara</button>
+  </div>`;
+  state.products = products;
+  state.cart = [];
+  drawCart();
+}
+
+function addByManual(){
+  const code = document.getElementById('scan_manual').value.trim();
+  const p = (state.products||[]).find(x=>x.productId===code);
+  if(!p) return alert('Producto no encontrado');
+  const qty = Number(prompt('Cantidad', '1')||1);
+  state.cart.push({productId:p.productId,nombre:p.nombre,precio:Number(p.precio),cantidad:qty});
+  drawCart();
+  document.getElementById('scan_manual').value='';
+}
+
+function drawCart(){
+  const total = state.cart.reduce((s,i)=>s+i.precio*i.cantidad,0);
+  const html = state.cart.map((i,idx)=>`<div class="card">${i.nombre} x ${i.cantidad} = $${(i.precio*i.cantidad).toFixed(2)} <button onclick="inc(${idx})">+</button><button onclick="dec(${idx})">-</button></div>`).join('') + `<div class="card"><b>Total: $${total.toFixed(2)}</b></div>`;
+  const el = document.getElementById('sale_items'); if(el) el.innerHTML=html;
+}
+function inc(i){state.cart[i].cantidad++;drawCart();}
+function dec(i){state.cart[i].cantidad=Math.max(1,state.cart[i].cantidad-1);drawCart();}
+
+async function finishSale(){
+  const paidWith = Number(document.getElementById('paid_with').value||0);
+  const customerName = document.getElementById('customer_name').value||'Consumidor final';
+  const res = await run('registerSale',{items:state.cart,paidWith,customerName});
+  alert(`Venta ${res.saleId}\nTotal ${res.total}\nPagó con ${res.paidWith}\nCambio ${res.change}`);
+  await navigate('sales');
+}
+
+async function startScan(){
+  const video = document.getElementById('scanner');
+  state.scannerStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+  video.srcObject = state.scannerStream;
+  if ('BarcodeDetector' in window){
+    const detector = new BarcodeDetector({formats:['qr_code']});
+    const tick = async()=>{
+      if(!state.scannerStream) return;
+      try{
+        const codes = await detector.detect(video);
+        if(codes[0]?.rawValue){ document.getElementById('scan_manual').value = codes[0].rawValue; addByManual(); }
+      }catch(e){}
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+}
+function stopScan(){ if(state.scannerStream){state.scannerStream.getTracks().forEach(t=>t.stop()); state.scannerStream=null;}}
+
+async function renderAccess(c){
+  const users = await run('listAccessUsers');
+  c.innerHTML = `<div class="card"><h3>Permisos</h3>
+  <div class="grid"><input id="a_email" placeholder="correo@dominio.com"><input id="a_nombre" placeholder="Nombre"><select id="a_role"><option>vendedor</option><option>cliente</option><option>admin</option></select><button class="primary" onclick="saveAccess()">Guardar acceso</button></div>
+  <table class="table"><tr><th>Email</th><th>Rol</th><th>Nombre</th><th>Activo</th></tr>${users.map(u=>`<tr><td>${u.email}</td><td>${u.role}</td><td>${u.nombre||''}</td><td>${u.activo?'SI':'NO'}</td></tr>`).join('')}</table></div>`;
+}
+async function saveAccess(){await run('upsertAccessUser',{email:a_email.value,nombre:a_nombre.value,role:a_role.value,activo:true}); await navigate('access');}
+
+async function renderSettings(c){
+  const conf = await run('getBusinessConfig');
+  c.innerHTML = `<div class="card"><h3>Configuración</h3>
+    <input id="s_name" value="${conf.nombreNegocio||''}" placeholder="Nombre negocio">
+    <input id="s_color" value="${conf.colorPrimario||'#0b5fff'}" type="color">
+    <input id="s_threshold" value="${conf.lowStockThreshold||5}" type="number" min="0">
+    <input id="s_logo" type="file" accept="image/*">
+    <button class="primary" onclick="saveSettings()">Guardar configuración</button>
+  </div>`;
+}
+
+async function saveSettings(){
+  const payload = {nombreNegocio:s_name.value,colorPrimario:s_color.value,lowStockThreshold:Number(s_threshold.value||5)};
+  const file = document.getElementById('s_logo').files[0];
+  if(file){ const data = await fileToBase64(file); payload.logoBase64=data.base64; payload.logoMimeType=data.mimeType; }
+  await run('saveBusinessConfig', payload);
+  state.bootstrap = await run('getBootstrapData');
+  renderLayout();
+}
+
+async function renderJournal(c){
+  const rows = await run('listJournal');
+  c.innerHTML = `<div class="card"><h3>Libro diario</h3><table class="table"><tr><th>Fecha</th><th>Descripción</th><th>Débito</th><th>Crédito</th></tr>${rows.map(r=>`<tr><td>${new Date(r.fecha).toLocaleString()}</td><td>${r.descripcion}</td><td>${r.debito}</td><td>${r.credito}</td></tr>`).join('')}</table></div>`;
+}
+
+async function renderLedger(c){
+  const rows = await run('listLedger');
+  c.innerHTML = `<div class="card"><h3>Libro mayor</h3><table class="table"><tr><th>Fecha</th><th>Cuenta</th><th>Débito</th><th>Crédito</th><th>Balance</th></tr>${rows.map(r=>`<tr><td>${new Date(r.fecha).toLocaleString()}</td><td>${r.cuenta}</td><td>${r.debito}</td><td>${r.credito}</td><td>${r.balance}</td></tr>`).join('')}</table></div>`;
+}
+
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve({base64:reader.result.split(',')[1], mimeType:file.type});
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+init().catch(err=>{document.getElementById('app').innerHTML=`<div class="card">Error: ${err.message||err}</div>`;});
+</script>
